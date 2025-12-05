@@ -10,14 +10,13 @@ set -xe
 
 system_arch="$(uname -m)"
 
-# These are rolling versions, it shouldn't be assumed that a subsequent build will use the same tool and runtime code
-appimagetool_version="continuous"
+appimagetool_version="e15a487"
 appimagetool_filename="appimagetool-$system_arch.AppImage"
-appimagetool_baseurl="https://github.com/AppImage/appimagetool/releases/download/$appimagetool_version"
+appimagetool_baseurl="https://github.com/orazioedoardo/appimagetool/releases/download/$appimagetool_version"
 
-runtime_version="continuous"
+runtime_version="905f6cf"
 runtime_filename="runtime-$system_arch"
-runtime_baseurl="https://github.com/AppImage/type2-runtime/releases/download/$runtime_version"
+runtime_baseurl="https://github.com/orazioedoardo/type2-runtime/releases/download/$runtime_version"
 
 # Shared libraries as of Ubuntu 22.04
 required_libs=(
