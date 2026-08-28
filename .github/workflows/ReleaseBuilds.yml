@@ -57,7 +57,7 @@ jobs:
 
   build-macos-universal:
     needs: create-new-release
-    runs-on: macos-latest
+    runs-on: macos-14
     timeout-minutes: 15
 
     permissions:
