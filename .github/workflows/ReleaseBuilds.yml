@@ -14,7 +14,7 @@ jobs:
       latest_tag: ${{ steps.get-release-tag.outputs.latest_tag }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref_name }}
 
@@ -64,7 +64,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.create-new-release.outputs.latest_tag }}
 
@@ -93,7 +93,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.create-new-release.outputs.latest_tag }}
 
