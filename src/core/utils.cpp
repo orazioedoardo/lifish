@@ -82,6 +82,15 @@ std::string lif::readEntireFile(const std::string& path) {
 
 #ifdef __EMSCRIPTEN__
 static bool persistentFilesDirty = false;
+
+// Waits for the write to finish: the game may quit right after saving, and exiting
+// the runtime closes the database, failing any write still in flight.
+EM_ASYNC_JS(void, syncFSToIndexedDB, (), {
+	await new Promise((resolve) => FS.syncfs(false, (err) => {
+		if (err) console.warn("Saving to IndexedDB failed:", err);
+		resolve();
+	}));
+});
 #endif
 
 void lif::persistentFilesChanged() {
@@ -95,8 +104,6 @@ void lif::flushPersistentFiles() {
 	if (!persistentFilesDirty)
 		return;
 	persistentFilesDirty = false;
-	EM_ASM(FS.syncfs(false, function (err) {
-		if (err) console.warn("Saving to IndexedDB failed:", err);
-	}););
+	syncFSToIndexedDB();
 #endif
 }
