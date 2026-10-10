@@ -11,7 +11,7 @@ std::array<sf::Keyboard::Key, lif::controls::CONTROLS_NUM> lif::controls::player
 		/* Control::BOMB, */ sf::Keyboard::Key::RSystem
 #elif defined(__EMSCRIPTEN__)
 		// Ctrl+W/S/A/D are browser shortcuts and Ctrl+arrows switch macOS desktops
-		/* Control::BOMB, */ sf::Keyboard::Key::RAlt
+		/* Control::BOMB, */ sf::Keyboard::Key::Space
 #else
 		/* Control::BOMB, */ sf::Keyboard::Key::RControl
 #endif

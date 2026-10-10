@@ -41,7 +41,7 @@ python3 -m http.server --directory build-web   # then open http://localhost:8000
 ```
 SFML has no web support, so the build downloads SFML 2.6.2 and patches it with an SDL2 backend that
 renders through [gl4es](https://github.com/ptitSeb/gl4es) to WebGL (see `web/sfml`).
-On the web the bomb keys are Right Alt (player 1) and Left Alt (player 2), since Ctrl+WASD are browser
+On the web the bomb keys are Space (player 1) and Left Alt (player 2), since Ctrl+WASD are browser
 shortcuts. Cmd+F toggles fullscreen. Saves, high scores and preferences are kept in the browser's IndexedDB.
 
 ### Command line parameters ###
