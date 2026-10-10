@@ -5,6 +5,7 @@
 #include "ScreenStyle.hpp"
 #include "game.hpp"
 #include "language.hpp"
+#include <cmath>
 #include <iostream>
 #include <unordered_map>
 #include "json.hpp"
@@ -220,12 +221,15 @@ void ScreenBuilder::_fixAlign(lif::ui::Screen& screen) {
 					: rowAligns[row] == "right" ? (screen.size.x - rowWidths[row] - H_PADDING)
 					: (screen.size.x - rowWidths[row]) / 2;
 
+		// Snap to whole pixels: centering often lands on half pixels, which makes the
+		// (linearly filtered) glyphs and images blurry
+		const auto snap = [] (sf::Vector2f p) { return sf::Vector2f(std::round(p.x), std::round(p.y)); };
 		if (auto text = dynamic_cast<lif::ShadedText*>(drawable)) {
-			text->setPosition(text->getPosition() + sf::Vector2f(xOffset, yOffset));
+			text->setPosition(snap(text->getPosition() + sf::Vector2f(xOffset, yOffset)));
 		} else {
 			assert(dynamic_cast<sf::Sprite*>(drawable));
 			auto sprite = static_cast<sf::Sprite*>(drawable);
-			sprite->setPosition(sprite->getPosition() + sf::Vector2f(xOffset, yOffset));
+			sprite->setPosition(snap(sprite->getPosition() + sf::Vector2f(xOffset, yOffset)));
 		}
 	}
 }

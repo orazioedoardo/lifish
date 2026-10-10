@@ -6,6 +6,7 @@
 #include <SFML/System/Vector2.hpp>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <ostream>
 #include <filesystem>
 
@@ -121,16 +122,17 @@ inline sf::Vector2f normalized(const sf::Vector2<T>& v) {
  *  order to be horizontally centered relatively to `outerBounds`.
  */
 template<typename T, typename R>
-constexpr float centerX(sf::Rect<T> innerBounds, sf::Rect<R> outerBounds) {
-	return outerBounds.left + (outerBounds.width - innerBounds.width) / 2.f;
+inline float centerX(sf::Rect<T> innerBounds, sf::Rect<R> outerBounds) {
+	// Rounded to whole pixels: text on a half pixel is drawn blurry
+	return std::round(outerBounds.left + (outerBounds.width - innerBounds.width) / 2.f);
 }
 
 /** @return A float indicating the Y coordinate where `innerBounds` is to be positioned in
  *  order to be vertically centered relatively to `outerBounds`.
  */
 template<typename T, typename R>
-constexpr float centerY(sf::Rect<T> innerBounds, sf::Rect<R> outerBounds) {
-	return outerBounds.top + (outerBounds.height - innerBounds.height) / 2.f;
+inline float centerY(sf::Rect<T> innerBounds, sf::Rect<R> outerBounds) {
+	return std::round(outerBounds.top + (outerBounds.height - innerBounds.height) / 2.f);
 }
 
 /** Given a starting point `start`, returns the point which is at `extent` distance from it,
