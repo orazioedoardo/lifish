@@ -7,6 +7,9 @@
 #include <cassert>
 #include <iostream>
 #include <random>
+#ifdef __EMSCRIPTEN__
+#	include <emscripten.h>
+#endif
 #if defined(_WIN32) || defined(__MINGW32__)
 #	include <windows.h>
 #else
@@ -75,4 +78,25 @@ std::string lif::readEntireFile(const std::string& path) {
 	std::ostringstream sstr;
 	sstr << f.rdbuf();
 	return sstr.str();
+}
+
+#ifdef __EMSCRIPTEN__
+static bool persistentFilesDirty = false;
+#endif
+
+void lif::persistentFilesChanged() {
+#ifdef __EMSCRIPTEN__
+	persistentFilesDirty = true;
+#endif
+}
+
+void lif::flushPersistentFiles() {
+#ifdef __EMSCRIPTEN__
+	if (!persistentFilesDirty)
+		return;
+	persistentFilesDirty = false;
+	EM_ASM(FS.syncfs(false, function (err) {
+		if (err) console.warn("Saving to IndexedDB failed:", err);
+	}););
+#endif
 }

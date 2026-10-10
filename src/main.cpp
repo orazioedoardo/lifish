@@ -150,6 +150,10 @@ static void loadIcon(sf::Window& window) {
 
 static void createRenderWindow(sf::Window& window) {
 
+#ifdef __EMSCRIPTEN__
+	// The page handles fullscreen (Cmd+F); the canvas always has the game's size
+	lif::options.fullscreen = false;
+#endif
 	const sf::VideoMode videoMode = lif::options.fullscreen
 		? lif::options.videoMode
 		: sf::VideoMode(lif::options.windowSize.x, lif::options.windowSize.y);
@@ -344,6 +348,7 @@ int main(int argc, char **argv) {
 			window.draw(game->getGameTimer());
 
 		window.display();
+		lif::flushPersistentFiles();
 
 #ifndef RELEASE
 		dbgStats.timer.end("draw");

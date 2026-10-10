@@ -31,6 +31,19 @@ The game can be compiled on *nix (tested on Linux, OSX and FreeBSD) via `cmake .
 #### Windows ####
 On Windows you can use cmake + Visual Studio.
 
+#### Web (WebAssembly) ####
+The game can also be built for the browser with [Emscripten](https://emscripten.org) (tested with 6.0.12):
+```
+git submodule update --init extern/gl4es
+emcmake cmake -S . -B build-web -DRELEASE=true
+cmake --build build-web
+python3 -m http.server --directory build-web   # then open http://localhost:8000/BOOMRemake.html
+```
+SFML has no web support, so the build downloads SFML 2.6.2 and patches it with an SDL2 backend that
+renders through [gl4es](https://github.com/ptitSeb/gl4es) to WebGL (see `web/sfml`).
+On the web the bomb keys are Right Alt (player 1) and Left Alt (player 2), since Ctrl+WASD are browser
+shortcuts. Cmd+F toggles fullscreen. Saves, high scores and preferences are kept in the browser's IndexedDB.
+
 ### Command line parameters ###
 If launched from the command line, `lifish` accepts a bunch of parameters (see `lifish -h` for details).
 It also accepts an optional argument which is the path of the level JSON to use (default: `lifish.json`).

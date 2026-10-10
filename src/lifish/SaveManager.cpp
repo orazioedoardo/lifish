@@ -65,6 +65,7 @@ bool SaveManager::saveGame(const std::string& filename, const lif::LevelManager&
 	}
 
 	saveFile << value(save).serialize();
+	lif::persistentFilesChanged();
 
 	return true;
 }

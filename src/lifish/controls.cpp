@@ -9,6 +9,9 @@ std::array<sf::Keyboard::Key, lif::controls::CONTROLS_NUM> lif::controls::player
 		/* Control::RIGHT,*/ sf::Keyboard::Key::Right,
 #if defined(SFML_SYSTEM_MACOS)
 		/* Control::BOMB, */ sf::Keyboard::Key::RSystem
+#elif defined(__EMSCRIPTEN__)
+		// Ctrl+W/S/A/D are browser shortcuts and Ctrl+arrows switch macOS desktops
+		/* Control::BOMB, */ sf::Keyboard::Key::RAlt
 #else
 		/* Control::BOMB, */ sf::Keyboard::Key::RControl
 #endif
@@ -20,6 +23,9 @@ std::array<sf::Keyboard::Key, lif::controls::CONTROLS_NUM> lif::controls::player
 		/* Control::RIGHT, */ sf::Keyboard::Key::D,
 #if defined(SFML_SYSTEM_MACOS)
 		/* Control::BOMB,  */ sf::Keyboard::Key::LSystem
+#elif defined(__EMSCRIPTEN__)
+		// Ctrl+W/S/A/D are browser shortcuts and Ctrl+arrows switch macOS desktops
+		/* Control::BOMB,  */ sf::Keyboard::Key::LAlt
 #else
 		/* Control::BOMB,  */ sf::Keyboard::Key::LControl
 #endif

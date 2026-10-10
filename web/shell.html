@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BOOM Remake</title>
+<link rel="icon" href="BOOMRemake.png">
+<style>
+	:root {
+		--bg: #000;
+		--fg: #e8e4d8;
+		--muted: #8d8a80;
+		--accent: #e0a32e;
+	}
+	* { box-sizing: border-box; }
+	html, body {
+		margin: 0;
+		height: 100%;
+		background: var(--bg);
+		color: var(--fg);
+		font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+	}
+	body {
+		overflow: hidden;
+	}
+	/* The canvas keeps the game's 640x480 resolution; CSS scales it up with
+	   nearest-neighbour filtering, like the desktop build's window */
+	#stage {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100vw;
+		height: 100dvh;
+		overflow: hidden;
+		background: var(--bg);
+	}
+	canvas {
+		display: block;
+		width: min(100vw, calc(100dvh * 4 / 3));
+		aspect-ratio: 4 / 3;
+		image-rendering: pixelated;
+		outline: none;
+	}
+	#overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 16px;
+		background: radial-gradient(circle at center, #1b211d 0%, #000 75%);
+		text-align: center;
+	}
+	#overlay img { width: 96px; height: 96px; }
+	#overlay h1 {
+		margin: 0;
+		font-size: clamp(28px, 6vw, 48px);
+		letter-spacing: .08em;
+		color: var(--accent);
+	}
+	#status { color: var(--muted); min-height: 1.4em; }
+	progress {
+		width: min(60%, 320px);
+		accent-color: var(--accent);
+	}
+	button {
+		font: inherit;
+		font-weight: 600;
+		padding: 10px 28px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--accent);
+		color: #1a1405;
+		cursor: pointer;
+	}
+	button:disabled { opacity: .4; cursor: default; }
+	[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+	<div id="stage">
+		<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+		<div id="overlay">
+			<img src="BOOMRemake.png" alt="">
+			<h1>BOOM Remake</h1>
+			<progress id="progress" max="1" value="0"></progress>
+			<div id="status">Downloading…</div>
+			<button id="play" disabled>Play</button>
+		</div>
+	</div>
+
+<script>
+	const canvas = document.getElementById("canvas");
+	const overlay = document.getElementById("overlay");
+	const statusEl = document.getElementById("status");
+	const progressEl = document.getElementById("progress");
+	const playButton = document.getElementById("play");
+
+	// Ask for the discrete GPU on machines that have two (SDL doesn't expose this setting)
+	const getContext = canvas.getContext.bind(canvas);
+	canvas.getContext = (type, attrs) =>
+		getContext(type, type.startsWith("webgl") ? { ...attrs, powerPreference: "high-performance" } : attrs);
+
+	// Cmd+F toggles fullscreen. This runs before the game's own key handling,
+	// so the game never sees the keypress and the browser doesn't open its Find bar.
+	window.addEventListener("keydown", (e) => {
+		if (e.code === "KeyF" && e.metaKey && !e.repeat) {
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			if (document.fullscreenElement) {
+				document.exitFullscreen();
+			} else {
+				document.getElementById("stage").requestFullscreen();
+			}
+		}
+	}, true);
+
+	// WebGL contexts can be lost (e.g. GPU reset); the game can't recover from that
+	canvas.addEventListener("webglcontextlost", (e) => {
+		e.preventDefault();
+		showError("The WebGL context was lost. Reload the page to continue.");
+	});
+
+	function showError(text) {
+		overlay.hidden = false;
+		progressEl.hidden = true;
+		playButton.hidden = true;
+		statusEl.textContent = text;
+	}
+
+	var Module = {
+		canvas,
+		print: (text) => console.log(text),
+		printErr: (text) => console.warn(text),
+		setStatus(text) {
+			// Emscripten reports download progress as "Downloading data... (x/y)"
+			const m = text.match(/\((\d+(?:\.\d+)?)\/(\d+)\)/);
+			if (m) {
+				progressEl.value = parseInt(m[1]) / parseInt(m[2]);
+				statusEl.textContent = `Downloading… ${(parseInt(m[2]) / 1048576).toFixed(1)} MB`;
+			} else if (text) {
+				statusEl.textContent = text;
+			}
+		},
+		// Saves, high scores and preferences live under $HOME: keep them in IndexedDB
+		preRun: [() => {
+			const home = "/home/web_user";
+			Module.FS.mount(Module.IDBFS, {}, home);
+			Module.addRunDependency("syncfs");
+			Module.FS.syncfs(true, (err) => {
+				if (err) console.warn("Loading saved data failed:", err);
+				Module.removeRunDependency("syncfs");
+			});
+		}],
+		onRuntimeInitialized() {
+			progressEl.hidden = true;
+			statusEl.textContent = "Ready";
+			playButton.disabled = false;
+			playButton.focus();
+		},
+		onAbort(what) {
+			showError("The game crashed: " + what);
+		},
+		onExit(code) {
+			showError(code === 0 ? "Thanks for playing! Reload the page to play again." : "The game exited with an error.");
+		},
+	};
+
+	// Starting from a click also lets the browser unlock audio
+	playButton.addEventListener("click", () => {
+		overlay.hidden = true;
+		canvas.focus();
+		Module.callMain([]);
+	});
+
+	window.addEventListener("error", (e) => showError("Error: " + e.message));
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

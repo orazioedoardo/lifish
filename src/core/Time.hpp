@@ -31,7 +31,14 @@ public:
 
 	void update() {
 		const auto now = std::chrono::duration_cast<std::chrono::microseconds>(clock.now() - zeroTime).count();
+#ifdef __EMSCRIPTEN__
+		// Browsers stop requestAnimationFrame in hidden tabs: don't let game time jump on return
+		auto delta = now - realTime;
+		if (delta > 250'000)
+			delta = 1'000'000 / 60;
+#else
 		const auto delta = now - realTime;
+#endif
 		prevRealTime = realTime;
 		realTime = now;
 

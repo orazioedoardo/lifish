@@ -145,8 +145,15 @@ if(USE_STATIC_SFML)
 	message(STATUS "Using static SFML libs")
 	set(SFML_STATIC_LIBRARIES true)
 endif()
+if(EMSCRIPTEN)
+	# SFML has no web support: build a patched copy with an SDL2 + gl4es backend
+	include(web/sfml/SFMLEmscripten.cmake)
+	target_link_libraries(${PROJECT_NAME} sfml-graphics sfml-window sfml-audio sfml-system)
+else()
 find_package(SFML 2.5 COMPONENTS graphics window audio system REQUIRED)
-if (APPLE)
+endif()
+if (EMSCRIPTEN)
+elseif (APPLE)
 	target_link_libraries(${PROJECT_NAME} sfml-graphics sfml-window sfml-audio sfml-system "-framework Foundation")
 else()
 	target_link_libraries(${PROJECT_NAME} sfml-graphics sfml-window sfml-audio sfml-system)
@@ -267,4 +274,37 @@ else()
 			message(STATUS "Using GNU gold as linker")
 		endif()
 	endif()
+endif()
+
+# Web build (emcmake cmake -S . -B build-web -DRELEASE=true)
+if(EMSCRIPTEN)
+	# The game throws and catches C++ exceptions
+	target_compile_options(${PROJECT_NAME} PRIVATE -fexceptions)
+
+	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME BOOMRemake SUFFIX ".html")
+	target_link_options(${PROJECT_NAME} PRIVATE
+		-fexceptions
+		# display() awaits requestAnimationFrame and sf::sleep yields, so the game's
+		# own blocking loop runs unchanged
+		-sASYNCIFY
+		-sASYNCIFY_STACK_SIZE=131072
+		-sSTACK_SIZE=1048576
+		-sALLOW_MEMORY_GROWTH
+		-sFULL_ES2
+		-sGL_ENABLE_GET_PROC_ADDRESS
+		-sINVOKE_RUN=0
+		-sEXIT_RUNTIME
+		-sEXPORTED_RUNTIME_METHODS=callMain,FS,IDBFS,addRunDependency,removeRunDependency
+		-lidbfs.js
+		"--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
+		"--exclude-file=${CMAKE_SOURCE_DIR}/assets/screens/README"
+		"--shell-file=${CMAKE_SOURCE_DIR}/web/shell.html")
+	# Relink when the page or the assets change (list the files: a directory in
+	# LINK_DEPENDS only tracks its own timestamp)
+	file(GLOB_RECURSE WEB_ASSET_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/*")
+	set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+		"${CMAKE_SOURCE_DIR}/web/shell.html" ${WEB_ASSET_FILES})
+	add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/web/BOOMRemake.png" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/BOOMRemake.png")
 endif()

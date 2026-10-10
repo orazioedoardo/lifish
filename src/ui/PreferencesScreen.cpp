@@ -30,8 +30,10 @@ void PreferencesScreen::build() {
 	parent = "home";
 	_loadBGSprite(lif::getAsset("graphics", "screenbg1.png"));
 
-	// Gather fullscreen modes
+	// Gather fullscreen modes (none on the web: the page handles fullscreen)
+#ifndef __EMSCRIPTEN__
 	fullscreenModes = sf::VideoMode::getFullscreenModes();
+#endif
 
 	/* Layout:
 	 *
@@ -390,9 +392,13 @@ void PreferencesScreen::_setupTransitions() {
 	transitions.add("sounds_mute_toggle", std::make_pair(D::DOWN,  "n_players"));
 	transitions.add("music_volume_up",    std::make_pair(D::DOWN,  "sounds_volume_up"));
 	transitions.add("music_mute_toggle",  std::make_pair(D::DOWN,  "sounds_mute_toggle"));
-	transitions.add("n_players",          std::make_pair(D::DOWN,  "fullscreen"));
-	transitions.add("fullscreen",         std::make_pair(D::DOWN,  "fullscreen_res"));
-	transitions.add("fullscreen_res",     std::make_pair(D::DOWN,  "show_fps"));
+	if (fullscreenModes.size() > 0) {
+		transitions.add("n_players",          std::make_pair(D::DOWN,  "fullscreen"));
+		transitions.add("fullscreen",         std::make_pair(D::DOWN,  "fullscreen_res"));
+		transitions.add("fullscreen_res",     std::make_pair(D::DOWN,  "show_fps"));
+	} else {
+		transitions.add("n_players",          std::make_pair(D::DOWN,  "show_fps"));
+	}
 	transitions.add("show_fps",           std::make_pair(D::DOWN,  "vsync"));
 	transitions.add("vsync",              std::make_pair(D::DOWN,  "framerate_limit"));
 	transitions.add("framerate_limit",    std::make_pair(D::DOWN,  "show_game_timer"));

@@ -1,0 +1,678 @@
+diff -ruN -x Frameworks a/include/SFML/Audio/SoundStream.hpp b/include/SFML/Audio/SoundStream.hpp
+--- a/include/SFML/Audio/SoundStream.hpp	2026-10-10 13:23:25
++++ b/include/SFML/Audio/SoundStream.hpp	2026-10-10 13:23:25
+@@ -277,6 +277,48 @@
+     void streamData();
+ 
+     ////////////////////////////////////////////////////////////
++    /// \brief Create the buffers, fill the queue and start playing
++    ///
++    /// \return False if the stream was asked to start Stopped
++    ///
++    ////////////////////////////////////////////////////////////
++    bool streamBegin();
++
++    ////////////////////////////////////////////////////////////
++    /// \brief Refill processed buffers once
++    ///
++    /// \return False when streaming must end
++    ///
++    ////////////////////////////////////////////////////////////
++    bool streamStep();
++
++    ////////////////////////////////////////////////////////////
++    /// \brief Stop playing and release the buffers
++    ///
++    ////////////////////////////////////////////////////////////
++    void streamEnd();
++
++    ////////////////////////////////////////////////////////////
++    /// \brief Start streaming (in a thread, or from the frame pump on the web)
++    ///
++    ////////////////////////////////////////////////////////////
++    void launchStreaming();
++
++    ////////////////////////////////////////////////////////////
++    /// \brief Wait until streaming has ended
++    ///
++    ////////////////////////////////////////////////////////////
++    void waitStreaming();
++
++#if defined(SFML_SYSTEM_EMSCRIPTEN)
++    ////////////////////////////////////////////////////////////
++    /// \brief Step every active stream once (called once per frame)
++    ///
++    ////////////////////////////////////////////////////////////
++    static void pumpStreams();
++#endif
++
++    ////////////////////////////////////////////////////////////
+     /// \brief Fill a new buffer with audio samples, and append
+     ///        it to the playing queue
+     ///
+@@ -332,6 +374,8 @@
+     Uint64        m_samplesProcessed;         //!< Number of samples processed since beginning of the stream
+     Int64         m_bufferSeeks[BufferCount]; //!< If buffer is an "end buffer", holds next seek position, else NoLoop. For play offset calculation.
+     Time          m_processingInterval;       //!< Interval for checking and filling the internal sound buffers.
++    bool          m_requestStop;              //!< Set once the last buffer has been queued
++    bool          m_streamActive;             //!< True between streamBegin() and streamEnd() on the web
+ };
+ 
+ } // namespace sf
+diff -ruN -x Frameworks a/include/SFML/Config.hpp b/include/SFML/Config.hpp
+--- a/include/SFML/Config.hpp	2026-10-10 13:23:25
++++ b/include/SFML/Config.hpp	2026-10-10 13:23:25
+@@ -68,6 +68,11 @@
+ 
+     #endif
+ 
++#elif defined(__EMSCRIPTEN__)
++
++    // Web browser (Emscripten / WebAssembly)
++    #define SFML_SYSTEM_EMSCRIPTEN
++
+ #elif defined(__unix__)
+ 
+     // UNIX system, see which one it is
+diff -ruN -x Frameworks a/include/SFML/OpenGL.hpp b/include/SFML/OpenGL.hpp
+--- a/include/SFML/OpenGL.hpp	2026-10-10 13:23:25
++++ b/include/SFML/OpenGL.hpp	2026-10-10 13:23:25
+@@ -63,6 +63,10 @@
+     #include <OpenGLES/ES1/gl.h>
+     #include <OpenGLES/ES1/glext.h>
+ 
++#elif defined (SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <GL/gl.h>
++
+ #elif defined (SFML_SYSTEM_ANDROID)
+ 
+     #include <GLES/gl.h>
+diff -ruN -x Frameworks a/include/SFML/Window/WindowHandle.hpp b/include/SFML/Window/WindowHandle.hpp
+--- a/include/SFML/Window/WindowHandle.hpp	2026-10-10 13:23:25
++++ b/include/SFML/Window/WindowHandle.hpp	2026-10-10 13:23:25
+@@ -57,6 +57,11 @@
+     // Window handle is UIWindow (void*) on iOS - UIKit
+     typedef void* WindowHandle;
+ 
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    // Window handle is the SDL_Window
++    typedef void* WindowHandle;
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+ 
+     // Window handle is ANativeWindow* (void*) on Android
+diff -ruN -x Frameworks a/src/SFML/Audio/SoundFileFactory.cpp b/src/SFML/Audio/SoundFileFactory.cpp
+--- a/src/SFML/Audio/SoundFileFactory.cpp	2026-10-10 13:23:25
++++ b/src/SFML/Audio/SoundFileFactory.cpp	2026-10-10 13:23:25
+@@ -26,8 +26,10 @@
+ // Headers
+ ////////////////////////////////////////////////////////////
+ #include <SFML/Audio/SoundFileFactory.hpp>
++#if !defined(SFML_SYSTEM_EMSCRIPTEN) // no libFLAC on the web
+ #include <SFML/Audio/SoundFileReaderFlac.hpp>
+ #include <SFML/Audio/SoundFileWriterFlac.hpp>
++#endif
+ #include <SFML/Audio/SoundFileReaderMp3.hpp>
+ #include <SFML/Audio/SoundFileReaderOgg.hpp>
+ #include <SFML/Audio/SoundFileWriterOgg.hpp>
+@@ -46,8 +48,10 @@
+         static bool registered = false;
+         if (!registered)
+         {
++#if !defined(SFML_SYSTEM_EMSCRIPTEN)
+             sf::SoundFileFactory::registerReader<sf::priv::SoundFileReaderFlac>();
+             sf::SoundFileFactory::registerWriter<sf::priv::SoundFileWriterFlac>();
++#endif
+             sf::SoundFileFactory::registerReader<sf::priv::SoundFileReaderMp3>();
+             sf::SoundFileFactory::registerReader<sf::priv::SoundFileReaderOgg>();
+             sf::SoundFileFactory::registerWriter<sf::priv::SoundFileWriterOgg>();
+diff -ruN -x Frameworks a/src/SFML/Audio/SoundStream.cpp b/src/SFML/Audio/SoundStream.cpp
+--- a/src/SFML/Audio/SoundStream.cpp	2026-10-10 13:23:25
++++ b/src/SFML/Audio/SoundStream.cpp	2026-10-10 13:23:25
+@@ -29,6 +29,8 @@
+ #include <SFML/Audio/AudioDevice.hpp>
+ #include <SFML/Audio/ALCheck.hpp>
+ #include <SFML/System/Sleep.hpp>
++#include <algorithm>
++#include <vector>
+ #include <SFML/System/Err.hpp>
+ #include <SFML/System/Lock.hpp>
+ 
+@@ -59,7 +61,9 @@
+ m_loop            (false),
+ m_samplesProcessed(0),
+ m_bufferSeeks     (),
+-m_processingInterval(milliseconds(10))
++m_processingInterval(milliseconds(10)),
++m_requestStop     (false),
++m_streamActive    (false)
+ {
+ 
+ }
+@@ -77,7 +81,7 @@
+     }
+ 
+     // Wait for the thread to terminate
+-    m_thread.wait();
++    waitStreaming();
+ }
+ 
+ 
+@@ -149,7 +153,7 @@
+     // Start updating the stream in a separate thread to avoid blocking the application
+     m_isStreaming = true;
+     m_threadStartState = Playing;
+-    m_thread.launch();
++    launchStreaming();
+ }
+ 
+ 
+@@ -180,7 +184,7 @@
+     }
+ 
+     // Wait for the thread to terminate
+-    m_thread.wait();
++    waitStreaming();
+ 
+     // Move to the beginning
+     onSeek(Time::Zero);
+@@ -239,7 +243,7 @@
+ 
+     m_isStreaming = true;
+     m_threadStartState = oldStatus;
+-    m_thread.launch();
++    launchStreaming();
+ }
+ 
+ 
+@@ -290,16 +294,31 @@
+ ////////////////////////////////////////////////////////////
+ void SoundStream::streamData()
+ {
+-    bool requestStop = false;
++    if (!streamBegin())
++        return;
+ 
++    while (streamStep())
+     {
++        // Leave some time for the other threads if the stream is still playing
++        if (SoundSource::getStatus() != Stopped)
++            sleep(m_processingInterval);
++    }
++
++    streamEnd();
++}
++
++
++////////////////////////////////////////////////////////////
++bool SoundStream::streamBegin()
++{
++    {
+         Lock lock(m_threadMutex);
+ 
+         // Check if the thread was launched Stopped
+         if (m_threadStartState == Stopped)
+         {
+             m_isStreaming = false;
+-            return;
++            return false;
+         }
+     }
+ 
+@@ -309,7 +328,7 @@
+         m_bufferSeeks[i] = NoLoop;
+ 
+     // Fill the queue
+-    requestStop = fillQueue();
++    m_requestStop = fillQueue();
+ 
+     // Play the sound
+     alCheck(alSourcePlay(m_source));
+@@ -322,102 +341,109 @@
+             alCheck(alSourcePause(m_source));
+     }
+ 
+-    for (;;)
++    return true;
++}
++
++
++////////////////////////////////////////////////////////////
++bool SoundStream::streamStep()
++{
+     {
++        Lock lock(m_threadMutex);
++        if (!m_isStreaming)
++            return false;
++    }
++
++    // The stream has been interrupted!
++    if (SoundSource::getStatus() == Stopped)
++    {
++        if (!m_requestStop)
+         {
++            // Just continue
++            alCheck(alSourcePlay(m_source));
++        }
++        else
++        {
++            // End streaming
+             Lock lock(m_threadMutex);
+-            if (!m_isStreaming)
+-                break;
++            m_isStreaming = false;
+         }
++    }
+ 
+-        // The stream has been interrupted!
+-        if (SoundSource::getStatus() == Stopped)
+-        {
+-            if (!requestStop)
++    // Get the number of buffers that have been processed (i.e. ready for reuse)
++    ALint nbProcessed = 0;
++    alCheck(alGetSourcei(m_source, AL_BUFFERS_PROCESSED, &nbProcessed));
++
++    while (nbProcessed--)
++    {
++        // Pop the first unused buffer from the queue
++        ALuint buffer;
++        alCheck(alSourceUnqueueBuffers(m_source, 1, &buffer));
++
++        // Find its number
++        unsigned int bufferNum = 0;
++        for (unsigned int i = 0; i < BufferCount; ++i)
++            if (m_buffers[i] == buffer)
+             {
+-                // Just continue
+-                alCheck(alSourcePlay(m_source));
++                bufferNum = i;
++                break;
+             }
+-            else
+-            {
+-                // End streaming
+-                Lock lock(m_threadMutex);
+-                m_isStreaming = false;
+-            }
+-        }
+ 
+-        // Get the number of buffers that have been processed (i.e. ready for reuse)
+-        ALint nbProcessed = 0;
+-        alCheck(alGetSourcei(m_source, AL_BUFFERS_PROCESSED, &nbProcessed));
+-
+-        while (nbProcessed--)
++        // Retrieve its size and add it to the samples count
++        if (m_bufferSeeks[bufferNum] != NoLoop)
+         {
+-            // Pop the first unused buffer from the queue
+-            ALuint buffer;
+-            alCheck(alSourceUnqueueBuffers(m_source, 1, &buffer));
++            // This was the last buffer before EOF or Loop End: reset the sample count
++            m_samplesProcessed = static_cast<Uint64>(m_bufferSeeks[bufferNum]);
++            m_bufferSeeks[bufferNum] = NoLoop;
++        }
++        else
++        {
++            ALint size, bits;
++            alCheck(alGetBufferi(buffer, AL_SIZE, &size));
++            alCheck(alGetBufferi(buffer, AL_BITS, &bits));
+ 
+-            // Find its number
+-            unsigned int bufferNum = 0;
+-            for (unsigned int i = 0; i < BufferCount; ++i)
+-                if (m_buffers[i] == buffer)
+-                {
+-                    bufferNum = i;
+-                    break;
+-                }
+-
+-            // Retrieve its size and add it to the samples count
+-            if (m_bufferSeeks[bufferNum] != NoLoop)
++            // Bits can be 0 if the format or parameters are corrupt, avoid division by zero
++            if (bits == 0)
+             {
+-                // This was the last buffer before EOF or Loop End: reset the sample count
+-                m_samplesProcessed = static_cast<Uint64>(m_bufferSeeks[bufferNum]);
+-                m_bufferSeeks[bufferNum] = NoLoop;
++                err() << "Bits in sound stream are 0: make sure that the audio format is not corrupt "
++                      << "and initialize() has been called correctly" << std::endl;
++
++                // Abort streaming (exit main loop)
++                Lock lock(m_threadMutex);
++                m_isStreaming = false;
++                m_requestStop = true;
++                break;
+             }
+             else
+             {
+-                ALint size, bits;
+-                alCheck(alGetBufferi(buffer, AL_SIZE, &size));
+-                alCheck(alGetBufferi(buffer, AL_BITS, &bits));
+-
+-                // Bits can be 0 if the format or parameters are corrupt, avoid division by zero
+-                if (bits == 0)
+-                {
+-                    err() << "Bits in sound stream are 0: make sure that the audio format is not corrupt "
+-                          << "and initialize() has been called correctly" << std::endl;
+-
+-                    // Abort streaming (exit main loop)
+-                    Lock lock(m_threadMutex);
+-                    m_isStreaming = false;
+-                    requestStop = true;
+-                    break;
+-                }
+-                else
+-                {
+-                    m_samplesProcessed += static_cast<Uint64>(size / (bits / 8));
+-                }
++                m_samplesProcessed += static_cast<Uint64>(size / (bits / 8));
+             }
+-
+-            // Fill it and push it back into the playing queue
+-            if (!requestStop)
+-            {
+-                if (fillAndPushBuffer(bufferNum))
+-                    requestStop = true;
+-            }
+         }
+ 
+-        // Check if any error has occurred
+-        if (alGetLastError() != AL_NO_ERROR)
++        // Fill it and push it back into the playing queue
++        if (!m_requestStop)
+         {
+-            // Abort streaming (exit main loop)
+-            Lock lock(m_threadMutex);
+-            m_isStreaming = false;
+-            break;
++            if (fillAndPushBuffer(bufferNum))
++                m_requestStop = true;
+         }
++    }
+ 
+-        // Leave some time for the other threads if the stream is still playing
+-        if (SoundSource::getStatus() != Stopped)
+-            sleep(m_processingInterval);
++    // Check if any error has occurred
++    if (alGetLastError() != AL_NO_ERROR)
++    {
++        // Abort streaming (exit main loop)
++        Lock lock(m_threadMutex);
++        m_isStreaming = false;
++        return false;
+     }
+ 
++    return true;
++}
++
++
++////////////////////////////////////////////////////////////
++void SoundStream::streamEnd()
++{
+     // Stop the playback
+     alCheck(alSourceStop(m_source));
+ 
+@@ -431,6 +457,82 @@
+     alCheck(alSourcei(m_source, AL_BUFFER, 0));
+     alCheck(alDeleteBuffers(BufferCount, m_buffers));
+ }
++
++
++#if defined(SFML_SYSTEM_EMSCRIPTEN)
++
++// No threads on the web: active streams are stepped once per frame from EmscriptenContext::display()
++namespace
++{
++    std::vector<SoundStream*>& activeStreams()
++    {
++        static std::vector<SoundStream*> streams;
++        return streams;
++    }
++}
++
++namespace priv
++{
++    extern void (*emscriptenFrameHook)();
++}
++
++////////////////////////////////////////////////////////////
++void SoundStream::pumpStreams()
++{
++    std::vector<SoundStream*>& streams = activeStreams();
++    for (std::size_t i = 0; i < streams.size();)
++    {
++        SoundStream* stream = streams[i];
++        if (stream->streamStep())
++        {
++            ++i;
++            continue;
++        }
++        streams.erase(streams.begin() + static_cast<std::ptrdiff_t>(i));
++        stream->m_streamActive = false;
++        stream->streamEnd();
++    }
++}
++
++
++////////////////////////////////////////////////////////////
++void SoundStream::launchStreaming()
++{
++    priv::emscriptenFrameHook = &SoundStream::pumpStreams;
++    if (!streamBegin())
++        return;
++    m_streamActive = true;
++    activeStreams().push_back(this);
++}
++
++
++////////////////////////////////////////////////////////////
++void SoundStream::waitStreaming()
++{
++    if (!m_streamActive)
++        return;
++    std::vector<SoundStream*>& streams = activeStreams();
++    streams.erase(std::remove(streams.begin(), streams.end(), this), streams.end());
++    m_streamActive = false;
++    streamEnd();
++}
++
++#else
++
++////////////////////////////////////////////////////////////
++void SoundStream::launchStreaming()
++{
++    m_thread.launch();
++}
++
++
++////////////////////////////////////////////////////////////
++void SoundStream::waitStreaming()
++{
++    m_thread.wait();
++}
++
++#endif
+ 
+ 
+ ////////////////////////////////////////////////////////////
+diff -ruN -x Frameworks a/src/SFML/Graphics/Texture.cpp b/src/SFML/Graphics/Texture.cpp
+--- a/src/SFML/Graphics/Texture.cpp	2026-10-10 13:23:25
++++ b/src/SFML/Graphics/Texture.cpp	2026-10-10 13:23:25
+@@ -337,9 +337,9 @@
+     // Create an array of pixels
+     std::vector<Uint8> pixels(m_size.x * m_size.y * 4);
+ 
+-#ifdef SFML_OPENGL_ES
++#if defined(SFML_OPENGL_ES) || defined(SFML_SYSTEM_EMSCRIPTEN)
+ 
+-    // OpenGL ES doesn't have the glGetTexImage function, the only way to read
++    // OpenGL ES (and WebGL) doesn't have the glGetTexImage function, the only way to read
+     // from a texture is to bind it to a FBO and use glReadPixels
+     GLuint frameBuffer = 0;
+     glCheck(GLEXT_glGenFramebuffers(1, &frameBuffer));
+@@ -479,7 +479,8 @@
+     if (!m_texture || !texture.m_texture)
+         return;
+ 
+-#ifndef SFML_OPENGL_ES
++// WebGL 1 has no separate read/draw framebuffers to blit between: copy through an Image
++#if !defined(SFML_OPENGL_ES) && !defined(SFML_SYSTEM_EMSCRIPTEN)
+ 
+     {
+         TransientContextLock lock;
+@@ -565,7 +566,7 @@
+         return;
+     }
+ 
+-#endif // SFML_OPENGL_ES
++#endif // SFML_OPENGL_ES, SFML_SYSTEM_EMSCRIPTEN
+ 
+     update(texture.copyToImage(), x, y);
+ }
+diff -ruN -x Frameworks a/src/SFML/System/Unix/SleepImpl.cpp b/src/SFML/System/Unix/SleepImpl.cpp
+--- a/src/SFML/System/Unix/SleepImpl.cpp	2026-10-10 13:23:25
++++ b/src/SFML/System/Unix/SleepImpl.cpp	2026-10-10 13:23:25
+@@ -28,6 +28,9 @@
+ #include <SFML/System/Unix/SleepImpl.hpp>
+ #include <errno.h>
+ #include <time.h>
++#if defined(SFML_SYSTEM_EMSCRIPTEN)
++#include <emscripten.h>
++#endif
+ 
+ 
+ namespace sf
+@@ -37,6 +40,10 @@
+ ////////////////////////////////////////////////////////////
+ void sleepImpl(Time time)
+ {
++#if defined(SFML_SYSTEM_EMSCRIPTEN)
++    emscripten_sleep(static_cast<unsigned int>(time.asMilliseconds()));
++    return;
++#endif
+     Int64 usecs = time.asMicroseconds();
+ 
+     // Construct the time to wait
+diff -ruN -x Frameworks a/src/SFML/Window/ClipboardImpl.hpp b/src/SFML/Window/ClipboardImpl.hpp
+--- a/src/SFML/Window/ClipboardImpl.hpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/ClipboardImpl.hpp	2026-10-10 13:23:25
+@@ -42,6 +42,10 @@
+     #include <SFML/Window/OSX/ClipboardImpl.hpp>
+ #elif defined(SFML_SYSTEM_IOS)
+     #include <SFML/Window/iOS/ClipboardImpl.hpp>
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <SFML/Window/Emscripten/ClipboardImpl.hpp>
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+     #include <SFML/Window/Android/ClipboardImpl.hpp>
+ #endif
+diff -ruN -x Frameworks a/src/SFML/Window/CursorImpl.hpp b/src/SFML/Window/CursorImpl.hpp
+--- a/src/SFML/Window/CursorImpl.hpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/CursorImpl.hpp	2026-10-10 13:23:25
+@@ -42,6 +42,10 @@
+     #include <SFML/Window/OSX/CursorImpl.hpp>
+ #elif defined(SFML_SYSTEM_IOS)
+     #include <SFML/Window/iOS/CursorImpl.hpp>
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <SFML/Window/Emscripten/CursorImpl.hpp>
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+     #include <SFML/Window/Android/CursorImpl.hpp>
+ #endif
+diff -ruN -x Frameworks a/src/SFML/Window/GlContext.cpp b/src/SFML/Window/GlContext.cpp
+--- a/src/SFML/Window/GlContext.cpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/GlContext.cpp	2026-10-10 13:23:25
+@@ -86,6 +86,11 @@
+     #include <SFML/Window/iOS/EaglContext.hpp>
+     typedef sf::priv::EaglContext ContextType;
+ 
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <SFML/Window/Emscripten/EmscriptenContext.hpp>
++    typedef sf::priv::EmscriptenContext ContextType;
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+ 
+     #include <SFML/Window/EglContext.hpp>
+diff -ruN -x Frameworks a/src/SFML/Window/InputImpl.hpp b/src/SFML/Window/InputImpl.hpp
+--- a/src/SFML/Window/InputImpl.hpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/InputImpl.hpp	2026-10-10 13:23:25
+@@ -42,6 +42,10 @@
+     #include <SFML/Window/OSX/InputImpl.hpp>
+ #elif defined(SFML_SYSTEM_IOS)
+     #include <SFML/Window/iOS/InputImpl.hpp>
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <SFML/Window/Emscripten/InputImpl.hpp>
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+     #include <SFML/Window/Android/InputImpl.hpp>
+ #endif
+diff -ruN -x Frameworks a/src/SFML/Window/JoystickImpl.hpp b/src/SFML/Window/JoystickImpl.hpp
+--- a/src/SFML/Window/JoystickImpl.hpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/JoystickImpl.hpp	2026-10-10 13:23:25
+@@ -105,6 +105,10 @@
+ 
+     #include <SFML/Window/iOS/JoystickImpl.hpp>
+ 
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <SFML/Window/Emscripten/JoystickImpl.hpp>
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+ 
+     #include <SFML/Window/Android/JoystickImpl.hpp>
+diff -ruN -x Frameworks a/src/SFML/Window/SensorImpl.hpp b/src/SFML/Window/SensorImpl.hpp
+--- a/src/SFML/Window/SensorImpl.hpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/SensorImpl.hpp	2026-10-10 13:23:25
+@@ -47,6 +47,10 @@
+ 
+     #include <SFML/Window/iOS/SensorImpl.hpp>
+ 
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <SFML/Window/Emscripten/SensorImpl.hpp>
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+ 
+     #include <SFML/Window/Android/SensorImpl.hpp>
+diff -ruN -x Frameworks a/src/SFML/Window/Window.cpp b/src/SFML/Window/Window.cpp
+--- a/src/SFML/Window/Window.cpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/Window.cpp	2026-10-10 13:23:25
+@@ -218,12 +218,14 @@
+     if (setActive())
+         m_context->display();
+ 
+-    // Limit the framerate if needed
++    // Limit the framerate if needed (on the web, display() already waits for the next animation frame)
++#if !defined(SFML_SYSTEM_EMSCRIPTEN)
+     if (m_frameTimeLimit != Time::Zero)
+     {
+         sleep(m_frameTimeLimit - m_clock.getElapsedTime());
+         m_clock.restart();
+     }
++#endif
+ }
+ 
+ 
+diff -ruN -x Frameworks a/src/SFML/Window/WindowImpl.cpp b/src/SFML/Window/WindowImpl.cpp
+--- a/src/SFML/Window/WindowImpl.cpp	2026-10-10 13:23:25
++++ b/src/SFML/Window/WindowImpl.cpp	2026-10-10 13:23:25
+@@ -74,6 +74,13 @@
+ 
+     #define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE
+ 
++#elif defined(SFML_SYSTEM_EMSCRIPTEN)
++
++    #include <SFML/Window/Emscripten/WindowImplEmscripten.hpp>
++    typedef sf::priv::WindowImplEmscripten WindowImplType;
++
++    #define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE
++
+ #elif defined(SFML_SYSTEM_ANDROID)
+ 
+     #include <SFML/Window/Android/WindowImplAndroid.hpp>

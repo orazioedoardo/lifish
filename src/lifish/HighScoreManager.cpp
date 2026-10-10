@@ -1,5 +1,6 @@
 #include "HighScoreManager.hpp"
 #include "core.hpp"
+#include "utils.hpp"
 #include <sstream>
 #include <fstream>
 #include <algorithm>
@@ -56,6 +57,7 @@ void HighScoreManager::saveHighScores() {
 	for (const auto& entry : entries) {
 		f << entry.name << " " << entry.score << "\n";
 	}
+	lif::persistentFilesChanged();
 }
 
 bool HighScoreManager::isHighScore(int score) const {

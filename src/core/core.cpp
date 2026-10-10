@@ -62,6 +62,10 @@ static bool _initPwd() {
 #if defined(SFML_SYSTEM_WINDOWS)
 	GetModuleFileName(NULL, pwd, lif::PWD_BUFSIZE);
 
+#elif defined(__EMSCRIPTEN__)
+	// The page preloads assets/ into /assets: act as if the executable were in /
+	strcpy(pwd, "/BOOMRemake");
+
 #elif defined(__unix__)
 	ssize_t bytes = 0;
 	if (access("/proc/self/exe", F_OK) != -1) {

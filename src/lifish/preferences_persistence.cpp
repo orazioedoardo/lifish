@@ -74,6 +74,7 @@ void lif::savePreferences(std::string fpath) {
 	file << value(out).serialize() << "\n";
 
 	std::cerr << "[ INFO ] saved preferences in " << fpath << ".\n";
+	lif::persistentFilesChanged();
 }
 
 void lif::loadPreferences(std::string fpath) {

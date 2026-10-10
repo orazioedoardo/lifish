@@ -215,6 +215,14 @@ sf::View keepRatio(const sf::Vector2f& size, const sf::Vector2u& designedsize);
 
 bool createDirIfNotExisting(const std::filesystem::path& path);
 
+/** Call after writing saves, high scores or preferences. On the web they live in memory
+ *  until flushPersistentFiles() copies them to the browser's IndexedDB.
+ */
+void persistentFilesChanged();
+
+/** Copies changed saved files to IndexedDB (web only). Called once per frame. */
+void flushPersistentFiles();
+
 std::string readEntireFile(const std::string& path);
 
 } // end namespace lif
