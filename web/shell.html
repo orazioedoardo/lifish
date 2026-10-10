@@ -11,6 +11,7 @@
 		--fg: #e8e4d8;
 		--muted: #8d8a80;
 		--accent: #e0a32e;
+		--accent-fg: #1a1405;
 	}
 	* { box-sizing: border-box; }
 	html, body {
@@ -50,7 +51,7 @@
 		align-items: center;
 		justify-content: center;
 		gap: 16px;
-		background: radial-gradient(circle at center, #1b211d 0%, #000 75%);
+		background: radial-gradient(circle at center, color-mix(in srgb, var(--accent) 12%, #000) 0%, #000 75%);
 		text-align: center;
 	}
 	#overlay img { width: 96px; height: 96px; }
@@ -60,7 +61,7 @@
 		letter-spacing: .08em;
 		color: var(--accent);
 	}
-	#status { color: var(--muted); min-height: 1.4em; }
+	#status { color: var(--muted); min-height: 1.4em; font-variant-numeric: tabular-nums; }
 	progress {
 		width: min(60%, 320px);
 		accent-color: var(--accent);
@@ -72,7 +73,7 @@
 		border: 0;
 		border-radius: 999px;
 		background: var(--accent);
-		color: #1a1405;
+		color: var(--accent-fg);
 		cursor: pointer;
 	}
 	button:disabled { opacity: .4; cursor: default; }
@@ -85,12 +86,14 @@
 		<div id="overlay">
 			<img src="BOOMRemake.png" alt="">
 			<h1>BOOM Remake</h1>
-			<progress id="progress" max="1" value="0"></progress>
-			<div id="status">Downloading…</div>
-			<button id="play" disabled>Play</button>
+			<progress id="progress" max="1" value="0" hidden></progress>
+			<div id="status"></div>
+			<button id="play" disabled>Download</button>
 		</div>
 	</div>
 
+<script id="game-files" type="application/json">null</script>
+<template id="game-script">{{{ SCRIPT }}}</template>
 <script>
 	const canvas = document.getElementById("canvas");
 	const overlay = document.getElementById("overlay");
@@ -134,16 +137,6 @@
 		canvas,
 		print: (text) => console.log(text),
 		printErr: (text) => console.warn(text),
-		setStatus(text) {
-			// Emscripten reports download progress as "Downloading data... (x/y)"
-			const m = text.match(/\((\d+(?:\.\d+)?)\/(\d+)\)/);
-			if (m) {
-				progressEl.value = parseInt(m[1]) / parseInt(m[2]);
-				statusEl.textContent = `Downloading… ${(parseInt(m[2]) / 1048576).toFixed(1)} MB`;
-			} else if (text) {
-				statusEl.textContent = text;
-			}
-		},
 		// Saves, high scores and preferences live under $HOME: keep them in IndexedDB
 		preRun: [() => {
 			const home = "/home/web_user";
@@ -157,7 +150,9 @@
 		onRuntimeInitialized() {
 			progressEl.hidden = true;
 			statusEl.textContent = "Ready";
+			playButton.textContent = "Play";
 			playButton.disabled = false;
+			ready = true;
 			playButton.focus();
 		},
 		onAbort(what) {
@@ -168,8 +163,79 @@
 		},
 	};
 
+	// Nothing is downloaded until the player asks: the page shows how big the download is,
+	// "Download" fetches the game and "Play" starts it. web-game-ports/build.py fills in #game-files
+	// with the content-hashed file names and sizes it publishes; a plain build uses emcc's names.
+	let files;
+	let ready = false;
+	const formatSize = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
+
+	async function getFiles() {
+		const published = JSON.parse(document.getElementById("game-files").textContent);
+		if (published) return published;
+		const js = document.getElementById("game-script").content.querySelector("script").getAttribute("src");
+		const base = js.replace(/\.js$/, "");
+		const files = { js: { url: js }, wasm: { url: base + ".wasm" }, data: { url: base + ".data" } };
+		await Promise.all(Object.values(files).map(async (file) => {
+			const response = await fetch(file.url, { method: "HEAD" });
+			if (!response.ok) throw new Error(`${file.url}: ${response.status} ${response.statusText}`);
+			file.size = Number(response.headers.get("Content-Length")) || 0;
+		}));
+		return files;
+	}
+
+	async function download(file, onProgress) {
+		const response = await fetch(file.url);
+		if (!response.ok) throw new Error(`${file.url}: ${response.status} ${response.statusText}`);
+		const chunks = [];
+		const reader = response.body.getReader();
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+			onProgress(value.length);
+		}
+		return new Blob(chunks).arrayBuffer();
+	}
+
+	async function load() {
+		const total = files.js.size + files.wasm.size + files.data.size;
+		let received = 0;
+		progressEl.hidden = false;
+		const onProgress = (bytes) => {
+			received += bytes;
+			progressEl.value = total ? Math.min(received / total, 1) : 0;
+			statusEl.textContent = `Downloading… ${formatSize(received)} of ${formatSize(total)}`;
+		};
+		onProgress(0);
+		const [js, wasm, data] = await Promise.all([files.js, files.wasm, files.data].map((file) => download(file, onProgress)));
+		statusEl.textContent = "Starting…";
+		// Hand the downloads to the Emscripten runtime so that it doesn't fetch them again
+		Module.instantiateWasm = (imports, receiveInstance) => {
+			WebAssembly.instantiate(wasm, imports).then(
+				({ instance }) => receiveInstance(instance),
+				(err) => showError("Starting the game failed: " + err.message));
+			return {};
+		};
+		Module.getPreloadedPackage = () => data;
+		const script = document.createElement("script");
+		script.src = URL.createObjectURL(new Blob([js], { type: "text/javascript" }));
+		document.body.append(script);
+	}
+
+	getFiles().then((found) => {
+		files = found;
+		statusEl.textContent = `${formatSize(files.js.size + files.wasm.size + files.data.size)} download`;
+		playButton.disabled = false;
+	}, (err) => showError("Couldn't find the game files: " + err.message));
+
 	// Starting from a click also lets the browser unlock audio
 	playButton.addEventListener("click", () => {
+		if (!ready) {
+			playButton.disabled = true;
+			load().catch((err) => showError("Downloading the game failed: " + err.message));
+			return;
+		}
 		overlay.hidden = true;
 		canvas.focus();
 		Module.callMain([]);
@@ -177,6 +243,5 @@
 
 	window.addEventListener("error", (e) => showError("Error: " + e.message));
 </script>
-{{{ SCRIPT }}}
 </body>
 </html>
