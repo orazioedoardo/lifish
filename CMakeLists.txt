@@ -281,7 +281,8 @@ if(EMSCRIPTEN)
 	# The game throws and catches C++ exceptions
 	target_compile_options(${PROJECT_NAME} PRIVATE -fexceptions)
 
-	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME BOOMRemake SUFFIX ".html")
+	# Builds the game's .js, .wasm and .data; the web page that runs them comes from the site hosting the game
+	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME BOOMRemake SUFFIX ".js")
 	target_link_options(${PROJECT_NAME} PRIVATE
 		-fexceptions
 		# display() awaits requestAnimationFrame and sf::sleep yields, so the game's
@@ -297,13 +298,11 @@ if(EMSCRIPTEN)
 		-sEXPORTED_RUNTIME_METHODS=callMain,FS,IDBFS,addRunDependency,removeRunDependency
 		-lidbfs.js
 		"--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
-		"--exclude-file=${CMAKE_SOURCE_DIR}/assets/screens/README"
-		"--shell-file=${CMAKE_SOURCE_DIR}/web/shell.html")
-	# Relink when the page or the assets change (list the files: a directory in
+		"--exclude-file=${CMAKE_SOURCE_DIR}/assets/screens/README")
+	# Relink when the assets change (list the files: a directory in
 	# LINK_DEPENDS only tracks its own timestamp)
 	file(GLOB_RECURSE WEB_ASSET_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/*")
-	set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
-		"${CMAKE_SOURCE_DIR}/web/shell.html" ${WEB_ASSET_FILES})
+	set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS ${WEB_ASSET_FILES})
 	add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"${CMAKE_SOURCE_DIR}/web/BOOMRemake.png" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/BOOMRemake.png")

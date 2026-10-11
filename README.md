@@ -37,8 +37,9 @@ The game can also be built for the browser with [Emscripten](https://emscripten.
 git submodule update --init extern/gl4es
 emcmake cmake -S . -B build-web -DRELEASE=true
 cmake --build build-web
-python3 -m http.server --directory build-web   # then open http://localhost:8000/BOOMRemake.html
 ```
+This builds `BOOMRemake.js`, `.wasm`, `.data` (the game's assets) and `BOOMRemake.png` (its icon) in `build-web`.
+There's no web page in the build: the site that hosts the game provides it. That page must give the runtime its canvas (`Module.canvas`), keep `/home/web_user` in IndexedDB (mount `IDBFS` there and sync it before the game starts), and start the game with `Module.callMain()`, from a click so that the browser allows audio.
 SFML has no web support, so the build downloads SFML 2.6.2 and patches it with an SDL2 backend that
 renders through [gl4es](https://github.com/ptitSeb/gl4es) to WebGL (see `web/sfml`).
 On the web the bomb keys are Space (player 1) and Left Alt (player 2), since Ctrl+WASD are browser
