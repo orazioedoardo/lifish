@@ -1,0 +1,13 @@
+diff --git a/src/gl/texture_params.c b/src/gl/texture_params.c
+index 96e07205..fa8ce375 100644
+--- a/src/gl/texture_params.c
++++ b/src/gl/texture_params.c
+@@ -923,6 +923,8 @@ void realize_textures(int drawing) {
+                 glstate->actual_tex2d[i] = t;
+             }
+         }
++        // Texture 0 is no texture at all in WebGL (unlike OpenGL's default texture): nothing to set up
++        if(!t) continue;
+         // check, if drawing, if mipmap needs some special care...
+         if(drawing) {
+             if((globals4es.automipmap==3) || ((globals4es.automipmap==1) && (tex->mipmap_auto==0)) || (tex->compressed && (tex->mipmap_auto==0)))
