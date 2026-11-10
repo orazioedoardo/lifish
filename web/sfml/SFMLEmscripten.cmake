@@ -32,13 +32,8 @@ set(SFML_SRC "${${SFML_FETCH_NAME}_SOURCE_DIR}")
 # gl4es translates fixed-function OpenGL to GLES2/WebGL
 set(GL4ES_DIR "${CMAKE_SOURCE_DIR}/extern/gl4es")
 set(GL4ES_LIBRARY "${GL4ES_DIR}/lib/libGL.a")	# gl4es always builds into its own source tree
-set(GL4ES_PATCH "${CMAKE_SOURCE_DIR}/web/gl4es-no-texture-0.patch")
 ExternalProject_Add(gl4es
 	SOURCE_DIR "${GL4ES_DIR}"
-	# SFML binds texture 0 to draw untextured shapes, and gl4es then sets up its filtering and mipmaps as if it were
-	# OpenGL's default texture; in WebGL it's no texture at all, and each of those calls logs a warning. The check
-	# makes re-running this step harmless once the patch is in.
-	PATCH_COMMAND sh -c "git apply --reverse --check '${GL4ES_PATCH}' 2>/dev/null || git apply '${GL4ES_PATCH}'"
 	CMAKE_ARGS
 		-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
 		-DCMAKE_BUILD_TYPE=Release
